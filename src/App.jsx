@@ -4,30 +4,62 @@ import { Document, Packer, Paragraph, ImageRun, Table, TableRow, TableCell, Widt
 import './App.css'
 
 function App() {
-  const getImageType = (mimeType) => {
-    const types = {
-      'image/png': 'png',
-      'image/jpeg': 'jpg',
-      'image/jpg': 'jpg',
-      'image/gif': 'gif',
-      'image/bmp': 'bmp',
-    };
-    return types[mimeType] || 'png';
+  // Load image, normalize orientation, and compress
+  // - Fixes EXIF rotation issues (photos appearing rotated on some devices)
+  // - Scales down large images to reduce file size
+  // - Uses JPEG compression for smaller output
+  const loadAndNormalizeImage = (file, targetWidth, targetHeight) => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        // Scale down to max 800px on longest side (reduces file size significantly)
+        const maxDimension = 800;
+        const quality = 0.7; // JPEG quality (0.7 = good balance of size vs quality)
+        
+        let width = img.width;
+        let height = img.height;
+        
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.round((height / width) * maxDimension);
+            width = maxDimension;
+          } else {
+            width = Math.round((width / height) * maxDimension);
+            height = maxDimension;
+          }
+        }
+        
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        
+        canvas.toBlob((blob) => {
+          blob.arrayBuffer().then((buffer) => {
+            resolve({
+              data: new Uint8Array(buffer),
+              type: 'jpg',
+              width: targetWidth,
+              height: targetHeight,
+            });
+          });
+        }, 'image/jpeg', quality);
+        
+        URL.revokeObjectURL(img.src);
+      };
+      img.src = URL.createObjectURL(file);
+    });
   };
 
   const handleGenerate = async (e) => {
     const files = Array.from(e.target.files);
-    const imageWidth = 120;
-    const imageHeight = 120;
+    // pixels = cm ÷ 2.54 × 72
+    const imageWidth = 128;  // 4.5cm ÷ 2.54 × 72 = 128 pixels
+    const imageHeight = 170; // 6cm ÷ 2.54 × 72 = 170 pixels
 
     const imageData = await Promise.all(
-      files.map(async (file) => {
-        const buffer = await file.arrayBuffer();
-        const uint8Array = new Uint8Array(buffer);
-        const type = getImageType(file.type);
-        
-        return { data: uint8Array, type, width: imageWidth, height: imageHeight };
-      })
+      files.map((file) => loadAndNormalizeImage(file, imageWidth, imageHeight))
     );
 
     // Group images into rows of 3
